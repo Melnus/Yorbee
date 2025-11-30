@@ -5,278 +5,269 @@ import time
 import plotly.express as px
 import traceback
 
-# --- 0. ゲーム設定 (Config) ---
-st.set_page_config(page_title="Yorbee | 冒険の書", page_icon="⚔️", layout="centered")
+# --- 0. ゲーム設定 ---
+st.set_page_config(page_title="Yorbee | 冒険の書", page_icon="⚔️", layout="wide") # レイアウトをwideに変更
 
-# SBCM理論に基づく地域単価 (柏市の標準ブロックから算出された1人あたり時間単価)
-LOCAL_STD_PRICE = 2500  # ¥2,500/時間
+LOCAL_STD_PRICE = 2500
 
 # ==========================================
-# 🛡️ 汎用エラー画面 (Global Error Handler)
+# 🛡️ 汎用エラー画面
 # ==========================================
 def show_error_screen(e):
     st.error("💀 通信魔法が途切れました (System Error)")
-    
-    st.markdown(f"""
-    ### ⚠️ 冒険の記録に失敗しました
-    
-    予期せぬモンスター（バグ）に遭遇したようです。
-    ギルドの技術班が現在調査中です。
-    
-    **エラー内容:** `{str(e)}`
-    """)
-    
-    # 開発者向けのエラー詳細（デバッグ用）
-    with st.expander("🕵️ ギルドマスター用ログ (開発者用)"):
+    with st.expander("詳細ログ"):
         st.code(traceback.format_exc())
-    
-    st.markdown("---")
-    
-    # リセットボタン
-    if st.button("🔄 酒場に戻る (リロード)", type="primary"):
+    if st.button("🔄 リセット"):
         st.session_state.clear()
         st.rerun()
 
 # ==========================================
-# 🎮 ゲーム本編ロジック
+# 🧠 データ・セッション管理
 # ==========================================
-def main_game():
-    # セッション管理
-    if 'phase' not in st.session_state: st.session_state['phase'] = 'register'
-    if 'my_stats' not in st.session_state: st.session_state['my_stats'] = {}
-    if 'quest' not in st.session_state: st.session_state['quest'] = {}
-    if 'party' not in st.session_state: st.session_state['party'] = []
+def init_session():
+    if 'my_stats' not in st.session_state:
+        # デフォルト値
+        st.session_state['my_stats'] = {"name": "名無しの冒険者", "STR": 5, "INT": 5, "CHA": 5}
+    if 'active_quest' not in st.session_state:
+        st.session_state['active_quest'] = None # 受注中のクエスト
+    if 'party' not in st.session_state:
+        st.session_state['party'] = []
+    if 'wallet' not in st.session_state:
+        st.session_state['wallet'] = 0
 
-    # --- モックデータ: ギルドの仲間たち (匿名) ---
-    # 【修正】プログラムを堅牢にするため、遊び人にも空のSTR/INTがあると仮定して扱うか、.get()を使う
-    GUILD_MEMBERS = [
-        {"id": 1, "class": "魔法使い(経理)", "skills": {"INT": 8, "STR": 1}, "fee": 2000},
-        {"id": 2, "class": "戦士(肉体派)", "skills": {"INT": 2, "STR": 9}, "fee": 1800},
-        {"id": 3, "class": "遊び人(クリエイティブ)", "skills": {"INT": 6, "LUCK": 8}, "fee": 3000},
-    ]
+# モックデータ: ギルドメンバー
+GUILD_MEMBERS = [
+    {"id": 1, "class": "魔法使い(経理)", "skills": {"INT": 8, "STR": 1}, "fee": 2000},
+    {"id": 2, "class": "戦士(肉体派)", "skills": {"INT": 2, "STR": 9}, "fee": 1800},
+    {"id": 3, "class": "遊び人(クリエイティブ)", "skills": {"INT": 6, "LUCK": 8}, "fee": 3000},
+    {"id": 4, "class": "僧侶(メンター)", "skills": {"CHA": 9, "INT": 4}, "fee": 2500},
+]
 
-    # ==========================================
-    # Phase 1: キャラクター登録 (Registration)
-    # ==========================================
-    if st.session_state['phase'] == 'register':
-        st.title("🛡️ 冒険の書を作る")
-        st.caption("まずは君の分身（アバター）を作ろう！")
+# ==========================================
+# 📺 各ページ画面の定義
+# ==========================================
 
-        # 名前
-        name = st.text_input("君の名前は？", "勇者ヨシヒコ")
-
-        # PR文を捨てる演出
-        st.write("---")
-        st.write("📝 **自己PR文 (長文)**")
-        pr_text = st.text_area("ここにダラダラとした職務経歴書を書こうとしてない？", height=100, placeholder="私は大学時代にサークルの副代表として...")
+def page_profile():
+    st.title("🛡️ 冒険の書 (ステータス)")
+    
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        st.image("https://api.dicebear.com/7.x/adventurer/svg?seed=" + st.session_state['my_stats']['name'], width=200)
+    
+    with col2:
+        name = st.text_input("名前", st.session_state['my_stats']['name'])
         
-        col_bin1, col_bin2 = st.columns([1, 4])
-        with col_bin1:
-            if st.button("🗑️ 捨てる"):
-                st.toast("ポイッ！ 長いPRなんて誰も読まないよ！", icon="🗑️")
-        with col_bin2:
-            st.caption("← PR文はゴミ箱へ。大事なのは「今、何ができるか」だけ！")
-
-        # スキルセット入力 (楽しく！)
-        st.write("---")
-        st.subheader("⚡ 君のステータス")
+        st.caption("現在の能力値")
         c1, c2, c3 = st.columns(3)
-        str_score = c1.slider("💪 STR (体力・根性)", 1, 10, 5)
-        int_score = c2.slider("🧠 INT (事務・論理)", 1, 10, 5)
-        cha_score = c3.slider("💖 CHA (接客・愛嬌)", 1, 10, 5)
+        str_s = c1.slider("💪 STR", 1, 10, st.session_state['my_stats']['STR'])
+        int_s = c2.slider("🧠 INT", 1, 10, st.session_state['my_stats']['INT'])
+        cha_s = c3.slider("💖 CHA", 1, 10, st.session_state['my_stats']['CHA'])
+        
+        # 保存処理
+        st.session_state['my_stats'] = {"name": name, "STR": str_s, "INT": int_s, "CHA": cha_s}
+        
+        st.info(f"所持金: ¥{st.session_state['wallet']:,}")
 
-        # 志向性
-        st.write("---")
-        st.subheader("💎 キミは何したい？")
-        quest_type = st.multiselect("興味のあるクエスト", ["魔王討伐 (大プロジェクト)", "薬草採取 (単発バイト)", "街の警備 (定常業務)", "武器生成 (クリエイティブ)"])
+    st.divider()
+    st.caption("※ ここで設定した能力値に基づいて、クエストの適性が判定されます。")
 
-        if st.button("🚀 冒険を始める (登録完了)", type="primary"):
-            st.session_state['my_stats'] = {"name": name, "STR": str_score, "INT": int_score, "CHA": cha_score}
-            st.session_state['phase'] = 'order'  # 本来はホーム画面だが、デモ用に発注画面へ
-            st.balloons()
-            st.rerun()
+def page_quest_board():
+    st.title("📜 クエストボード (発注・受注)")
+    
+    # タブで「発注（自分がマスター）」と「受注（参加）」を分ける
+    tab1, tab2 = st.tabs(["📝 クエストを作る (発注)", "🔍 クエストを探す (受注)"])
+    
+    with tab1:
+        st.subheader("新しいクエストを張り出す")
+        
+        with st.container(border=True):
+            q_title = st.text_input("クエスト名", "魔王城の決算報告書作成")
+            
+            c1, c2 = st.columns(2)
+            req_int = c1.slider("必要な 🧠 INT", 0, 10, 5, key="q_int")
+            req_str = c2.slider("必要な 💪 STR", 0, 10, 2, key="q_str")
+            
+            hours = st.number_input("想定時間 (Hours)", 1, 100, 10)
+            est_budget = hours * LOCAL_STD_PRICE
+            st.caption(f"SBCM推奨報酬: ¥{est_budget:,}")
+            
+            budget = st.number_input("報酬額 (¥)", value=est_budget, step=1000)
+            
+            if st.button("✨ クエスト発行", type="primary"):
+                # クエストデータを保存
+                st.session_state['active_quest'] = {
+                    "title": q_title,
+                    "budget": budget,
+                    "req_int": req_int,
+                    "req_str": req_str,
+                    "status": "recruiting" # recruiting -> active -> cleared
+                }
+                st.toast("クエストボードに張り出されました！")
+                time.sleep(1)
+                st.rerun()
 
-    # ==========================================
-    # Phase 2: クエスト発注 (Ordering)
-    # ==========================================
-    elif st.session_state['phase'] == 'order':
-        st.title("📜 クエストボード (発注)")
-        st.caption("君がギルドマスターだ。解決したい問題を教えてくれ。")
+    with tab2:
+        st.info("現在は受注できるクエストがありません。(デモ版のため発注機能を使ってください)")
 
-        # 1. 欲しいスキル
-        st.subheader("1. どんな魔法(スキル)が必要？")
-        req_int = st.slider("必要な 🧠 INT (事務レベル)", 0, 10, 5)
-        req_str = st.slider("必要な 💪 STR (体力レベル)", 0, 10, 3)
+def page_party():
+    st.title("🍻 酒場 (チーム編成)")
+    
+    q = st.session_state['active_quest']
+    
+    if not q:
+        st.warning("現在進行中のクエストがありません。「クエストボード」で発注してください。")
+        return
 
-        # 2. 匿名マッチングプレビュー
-        st.info("👀 **チラ見せ:** 今、ギルドにはこんな冒険者が待機中だよ！")
-        matched_count = 0
+    if q['status'] != 'recruiting':
+        st.info("このクエストは既に冒険に出発しています。「ダンジョン」を確認してください。")
+        return
+
+    st.subheader(f"クエスト: {q['title']}")
+    st.metric("予算", f"¥{q['budget']:,}")
+    
+    col_L, col_R = st.columns([1, 1])
+    
+    with col_L:
+        st.markdown("### 🕵️ 候補者リスト")
+        total_fee = sum([m['fee'] for m in st.session_state['party']])
+        
         for m in GUILD_MEMBERS:
-            # 【修正点】 .get() を使って、キーが存在しない場合でも 0 として扱う（エラー回避）
+            # すでにパーティにいるかチェック
+            if m in st.session_state['party']: continue
+            
+            # スキルマッチ度
             m_int = m['skills'].get('INT', 0)
             m_str = m['skills'].get('STR', 0)
+            is_match = m_int >= q['req_int'] or m_str >= q['req_str']
             
-            if m_int >= req_int and m_str >= req_str:
-                # 合計レベルも安全に計算
-                total_lv = sum(m['skills'].values())
-                st.markdown(f"- 👤 **{m['class']}** (Lv.{total_lv}) が興味を持っています")
-                matched_count += 1
-        
-        if matched_count == 0:
-            st.warning("条件が厳しいかも…もう少しレベルを下げられる？")
-
-        # 3. 予算入力 (SBCMチェック)
-        st.subheader("2. 報酬 (SBCMチェック)")
-        
-        hours = st.number_input("想定時間 (Hours)", 1, 100, 10)
-        
-        # 推定予算の算出
-        est_budget = hours * LOCAL_STD_PRICE
-        st.caption(f"💡 SBCM理論による、この街の適正報酬目安: **¥{est_budget:,}**")
-
-        budget = st.number_input("君の提示額 (¥)", step=1000, value=int(est_budget))
-
-        if budget < est_budget * 0.8:
-            st.error(f"⚠️ 安すぎるよ！この街の平均(¥{est_budget:,})より低いと、誰も来てくれないかも…")
-        elif budget > est_budget * 1.5:
-            st.success("✨ お大臣様！これなら凄腕の勇者が来るよ！")
-        else:
-            st.info("✅ ちょうどいい相場感だね。")
-
-        if st.button("⚔️ パーティを集める (次へ)", type="primary"):
-            st.session_state['quest'] = {"budget": budget, "req_int": req_int, "req_str": req_str}
-            st.session_state['phase'] = 'teambuilding'
-            st.rerun()
-
-    # ==========================================
-    # Phase 3: チームビルディング (Party)
-    # ==========================================
-    elif st.session_state['phase'] == 'teambuilding':
-        st.title("🍻 酒場 (チーム編成)")
-        st.caption("1人で岩(課題)にぶち当たらなくても大丈夫！")
-
-        q = st.session_state['quest']
-        
-        # ボス（課題）の強さ表示
-        st.markdown("### 🦖 クエストの難易度")
-        boss_hp = (q['req_int'] + q['req_str']) * 10
-        st.progress(0.0, text=f"BOSS HP: {boss_hp}")
-        st.markdown("---")
-
-        col_L, col_R = st.columns([1, 1])
-
-        with col_L:
-            st.subheader("🤝 おすすめのパーティ")
-            # 自動マッチングロジック
-            current_power = 0
-            total_fee = 0
-            
-            for m in GUILD_MEMBERS:
-                # 予算内で、スキルが合う人をピックアップ
+            with st.container(border=True):
+                c1, c2 = st.columns([3, 1])
+                c1.markdown(f"**{m['class']}** (Fee: ¥{m['fee']})")
+                if is_match: c1.caption("✨ スキル適合")
+                
                 if total_fee + m['fee'] <= q['budget']:
-                    if st.button(f"仲間にする: {m['class']}", key=f"add_{m['id']}"):
+                    if c2.button("勧誘", key=f"inv_{m['id']}"):
                         st.session_state['party'].append(m)
-                        st.toast(f"{m['class']} がパーティに加わった！")
-            
-            st.markdown("---")
-            st.text_input("📩 友達を招待する (ID or Email)")
-            st.caption("登録してない友達も、招待リンクから即参戦できるよ！")
+                        st.rerun()
+                else:
+                    c2.button("高すぎ", disabled=True)
 
-        with col_R:
-            st.subheader("⚔️ 現在の戦力")
+    with col_R:
+        st.markdown("### ⛺ 現在のパーティ")
+        
+        if not st.session_state['party']:
+            st.caption("誰もいません...")
+        else:
+            current_power = 0
+            for p_mem in st.session_state['party']:
+                st.success(f"👤 {p_mem['class']}")
+                current_power += sum(p_mem['skills'].values()) * 10
             
-            # パーティ表示
-            if not st.session_state['party']:
-                st.warning("まだ誰もいない… 孤独だ…")
-            else:
-                for p_mem in st.session_state['party']:
-                    st.success(f"👤 {p_mem['class']}")
-                    # ここも安全に計算
-                    p_int = p_mem['skills'].get('INT', 0)
-                    p_str = p_mem['skills'].get('STR', 0)
-                    current_power += (p_int + p_str) * 5
-                    total_fee += p_mem['fee']
+            boss_hp = (q['req_int'] + q['req_str']) * 20
+            win_rate = min(1.0, current_power / boss_hp)
             
-            # 勝率計算
-            win_rate = min(1.0, current_power / boss_hp) if boss_hp > 0 else 1.0
-            st.write(f"勝率予想: {int(win_rate*100)}%")
+            st.write(f"攻略成功率: {int(win_rate*100)}%")
             st.progress(win_rate)
             
-            st.metric("合計報酬", f"¥{total_fee:,}", delta=f"予算残: ¥{q['budget'] - total_fee:,}")
-
             if win_rate >= 1.0:
-                if st.button("🚀 このメンバーで出発！", type="primary"):
-                    st.session_state['phase'] = 'dungeon'
-                    st.rerun()
+                if st.button("🚀 このメンバーで出発する！", type="primary", use_container_width=True):
+                    st.session_state['active_quest']['status'] = 'active'
+                    st.balloons()
+                    st.toast("ダンジョンへ移動しました！サイドバーから移動してください。")
+
+def page_dungeon():
+    st.title("🔥 ダンジョン (進捗管理)")
+    
+    q = st.session_state['active_quest']
+    
+    if not q or q['status'] == 'recruiting':
+        st.warning("現在攻略中のクエストはありません。酒場でパーティを組んで出発してください。")
+        return
+    
+    st.subheader(f"攻略中: {q['title']}")
+    
+    # オートパイロット演出
+    st.info("🤖 AIオートパイロット: ON")
+    
+    if q['status'] == 'active':
+        my_bar = st.progress(0)
+        status = st.empty()
+        
+        # デモ用：開くたびに進捗が進む演出（本来はDB管理）
+        for i in range(101):
+            time.sleep(0.02)
+            my_bar.progress(i)
+            if i < 100:
+                status.caption(f"進捗... {i}%")
             else:
-                st.error("戦力が足りない！もっと仲間を呼ぼう！")
-
-    # ==========================================
-    # Phase 4: 進捗 & 決済 (Dungeon)
-    # ==========================================
-    elif st.session_state['phase'] == 'dungeon':
-        st.title("🔥 攻略中 (進捗管理)")
+                status.success("🎉 クエストクリア！")
+                st.session_state['active_quest']['status'] = 'cleared'
+                st.rerun()
+                
+    elif q['status'] == 'cleared':
+        st.progress(100)
+        st.success("🎉 クエストクリア！")
         
-        # オートパイロットモード
-        is_auto = st.toggle("🤖 AIオートパイロットモード", value=True)
-        
-        if is_auto:
-            st.info("AIがチームのチャットログを解析し、進捗を自動更新しています...")
-            prog_bar = st.progress(0)
-            status_text = st.empty()
-            
-            # デモ用アニメーション
-            for percent in range(0, 101, 20):
-                time.sleep(0.5)
-                prog_bar.progress(percent)
-                if percent < 100:
-                    status_text.text(f"現在 {percent}% ... 敵の群れを突破中！")
-                else:
-                    status_text.text("🎉 クエストクリア！")
-        
-        else:
-            st.slider("マニュアル進捗管理", 0, 100, 50)
-            st.warning("手動モードです。チームに声をかけて進捗を確認してね。")
-
         st.markdown("---")
+        st.subheader("💰 報酬の分配")
         
-        # トラブル対応
-        with st.expander("🆘 ピンチ！敵が強すぎる（進捗が遅れてる）"):
-            st.write("大丈夫、追加の助っ人を呼べるよ。")
-            st.button("📞 近いスキルの人に救援要請 (Help)")
-
-        # 決済エリア
-        st.markdown("---")
-        st.subheader("💰 山分け (決済)")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("パーティメンバーへの送金準備完了")
+            for m in st.session_state['party']:
+                st.text(f"💸 {m['class']} へ ¥{m['fee']} 送金")
         
-        # まだクリアしてない場合の制御
-        if is_auto: # デモなのでオートなら完了扱い
-            st.success("成果が出たね！おめでとう！")
+        with col2:
+            remain = q['budget'] - sum([m['fee'] for m in st.session_state['party']])
+            st.metric("あなたの取り分 (管理費)", f"¥{remain:,}")
             
-            c1, c2 = st.columns([3, 1])
-            with c1:
-                st.write("報酬の分配準備ができました。")
-                wallet_ready = st.checkbox("ウォレットは登録した？ (まだなら急いで！)")
-            
-            with c2:
-                if wallet_ready:
-                    if st.button("💎 報酬を受け取る", type="primary"):
-                        st.balloons()
-                        st.markdown("## 💸 チャリーン！")
-                        st.write("メンバー全員のウォレットに着金しました。")
-                        st.write("お疲れ様！次の冒険でまた会おう！")
-                        if st.button("最初に戻る"):
-                            st.session_state['phase'] = 'register'
-                            st.session_state['party'] = []
-                            st.rerun()
-                else:
-                    st.button("💎 報酬を受け取る", disabled=True)
+            if st.button("💎 報酬を受け取って解散", type="primary"):
+                st.session_state['wallet'] += remain
+                st.session_state['active_quest'] = None
+                st.session_state['party'] = []
+                st.balloons()
+                st.success("お疲れ様でした！次のクエストを探しましょう。")
+                time.sleep(2)
+                st.rerun()
 
 # ==========================================
-# 🚀 アプリ実行エントリーポイント
+# 🚀 メインルーチン
 # ==========================================
+def main():
+    init_session()
+
+    # サイドバー・ナビゲーション
+    with st.sidebar:
+        st.header("Yorbee Menu")
+        
+        # ユーザー情報ミニ表示
+        st.caption(f"冒険者: {st.session_state['my_stats']['name']}")
+        st.caption(f"所持金: ¥{st.session_state['wallet']:,}")
+        st.divider()
+        
+        # メニュー選択
+        selection = st.radio(
+            "移動先",
+            ["冒険の書 (Profile)", "クエストボード (Job)", "酒場 (Team)", "ダンジョン (Work)"],
+            index=0
+        )
+        
+        st.divider()
+        st.info("💡 サイドバーでいつでも画面を切り替えられます")
+
+    # 画面ルーティング
+    if selection == "冒険の書 (Profile)":
+        page_profile()
+    elif selection == "クエストボード (Job)":
+        page_quest_board()
+    elif selection == "酒場 (Team)":
+        page_party()
+    elif selection == "ダンジョン (Work)":
+        page_dungeon()
+
 if __name__ == "__main__":
     try:
-        main_game()
+        main()
     except Exception as e:
         show_error_screen(e)
