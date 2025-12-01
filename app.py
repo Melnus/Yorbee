@@ -5,7 +5,11 @@ import time
 import traceback
 
 # --- 0. ゲーム設定 & SBCM定数 ---
-st.set_page_config(page_title="Yorbee | SBCM Lite", page_icon="⚔️", layout="wide")
+st.set_page_config(
+    page_title="Yorbee | 冒険の書",
+    page_icon="favicon.png",  
+    layout="wide"
+)
 
 # メソ経済学: 標準ブロック単価 (Standard Unit Price)
 # これが全ての価値基準になります
