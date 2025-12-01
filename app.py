@@ -2,12 +2,13 @@ import streamlit as st
 import pandas as pd
 import random
 import time
-import plotly.express as px
 import traceback
 
-# --- 0. ゲーム設定 ---
-st.set_page_config(page_title="Yorbee | 冒険の書", page_icon="⚔️", layout="wide") # レイアウトをwideに変更
+# --- 0. ゲーム設定 & SBCM定数 ---
+st.set_page_config(page_title="Yorbee | SBCM Lite", page_icon="⚔️", layout="wide")
 
+# メソ経済学: 標準ブロック単価 (Standard Unit Price)
+# これが全ての価値基準になります
 LOCAL_STD_PRICE = 2500
 
 # ==========================================
@@ -26,10 +27,9 @@ def show_error_screen(e):
 # ==========================================
 def init_session():
     if 'my_stats' not in st.session_state:
-        # デフォルト値
         st.session_state['my_stats'] = {"name": "名無しの冒険者", "STR": 5, "INT": 5, "CHA": 5}
     if 'active_quest' not in st.session_state:
-        st.session_state['active_quest'] = None # 受注中のクエスト
+        st.session_state['active_quest'] = None
     if 'party' not in st.session_state:
         st.session_state['party'] = []
     if 'wallet' not in st.session_state:
@@ -73,9 +73,8 @@ def page_profile():
     st.caption("※ ここで設定した能力値に基づいて、クエストの適性が判定されます。")
 
 def page_quest_board():
-    st.title("📜 クエストボード (発注・受注)")
+    st.title("📜 クエストボード (SBCM監査機能付)")
     
-    # タブで「発注（自分がマスター）」と「受注（参加）」を分ける
     tab1, tab2 = st.tabs(["📝 クエストを作る (発注)", "🔍 クエストを探す (受注)"])
     
     with tab1:
@@ -88,20 +87,39 @@ def page_quest_board():
             req_int = c1.slider("必要な 🧠 INT", 0, 10, 5, key="q_int")
             req_str = c2.slider("必要な 💪 STR", 0, 10, 2, key="q_str")
             
+            # --- ここからSBCMロジック適用 ---
             hours = st.number_input("想定時間 (Hours)", 1, 100, 10)
-            est_budget = hours * LOCAL_STD_PRICE
-            st.caption(f"SBCM推奨報酬: ¥{est_budget:,}")
             
-            budget = st.number_input("報酬額 (¥)", value=est_budget, step=1000)
+            # 標準予算の計算
+            std_budget = hours * LOCAL_STD_PRICE
+            st.caption(f"📉 標準ブロック適正価格: ¥{std_budget:,}")
             
-            if st.button("✨ クエスト発行", type="primary"):
-                # クエストデータを保存
+            # 実際の予算入力
+            budget = st.number_input("報酬額 (¥)", value=std_budget, step=1000)
+            
+            # 予算歪曲指数 (D_index) の判定
+            d_index = budget / std_budget if std_budget > 0 else 0
+            is_valid_quest = False
+            
+            if d_index < 0.5:
+                st.error(f"🛑 予算不足: 報酬が標準の{d_index:.0%}しかありません。ブラック案件として却下されます。")
+                is_valid_quest = False
+            elif d_index > 3.0:
+                st.warning(f"⚠️ 予算過剰: 報酬が標準の{d_index:.1f}倍です。不自然な高コスト（ハコモノ案件）の疑いがあります。")
+                st.caption("※ SBCM監査により、予算の見直しが推奨されます。")
+                is_valid_quest = False 
+            else:
+                st.success(f"✅ 監査承認: 適正な予算規模です ($D_{{index}}$ = {d_index:.2f})")
+                is_valid_quest = True
+            
+            # 発注ボタン (監査に通らないと押せない)
+            if st.button("✨ クエスト発行", type="primary", disabled=not is_valid_quest):
                 st.session_state['active_quest'] = {
                     "title": q_title,
                     "budget": budget,
                     "req_int": req_int,
                     "req_str": req_str,
-                    "status": "recruiting" # recruiting -> active -> cleared
+                    "status": "recruiting"
                 }
                 st.toast("クエストボードに張り出されました！")
                 time.sleep(1)
@@ -131,12 +149,13 @@ def page_party():
     with col_L:
         st.markdown("### 🕵️ 候補者リスト")
         total_fee = sum([m['fee'] for m in st.session_state['party']])
+        remaining = q['budget'] - total_fee
+        
+        st.caption(f"残り予算: ¥{remaining:,}")
         
         for m in GUILD_MEMBERS:
-            # すでにパーティにいるかチェック
             if m in st.session_state['party']: continue
             
-            # スキルマッチ度
             m_int = m['skills'].get('INT', 0)
             m_str = m['skills'].get('STR', 0)
             is_match = m_int >= q['req_int'] or m_str >= q['req_str']
@@ -146,12 +165,12 @@ def page_party():
                 c1.markdown(f"**{m['class']}** (Fee: ¥{m['fee']})")
                 if is_match: c1.caption("✨ スキル適合")
                 
-                if total_fee + m['fee'] <= q['budget']:
+                if m['fee'] <= remaining:
                     if c2.button("勧誘", key=f"inv_{m['id']}"):
                         st.session_state['party'].append(m)
                         st.rerun()
                 else:
-                    c2.button("高すぎ", disabled=True)
+                    c2.button("予算外", disabled=True)
 
     with col_R:
         st.markdown("### ⛺ 現在のパーティ")
@@ -186,15 +205,12 @@ def page_dungeon():
         return
     
     st.subheader(f"攻略中: {q['title']}")
-    
-    # オートパイロット演出
     st.info("🤖 AIオートパイロット: ON")
     
     if q['status'] == 'active':
         my_bar = st.progress(0)
         status = st.empty()
         
-        # デモ用：開くたびに進捗が進む演出（本来はDB管理）
         for i in range(101):
             time.sleep(0.02)
             my_bar.progress(i)
@@ -237,26 +253,20 @@ def page_dungeon():
 def main():
     init_session()
 
-    # サイドバー・ナビゲーション
     with st.sidebar:
         st.header("Yorbee Menu")
-        
-        # ユーザー情報ミニ表示
         st.caption(f"冒険者: {st.session_state['my_stats']['name']}")
         st.caption(f"所持金: ¥{st.session_state['wallet']:,}")
         st.divider()
         
-        # メニュー選択
         selection = st.radio(
             "移動先",
             ["冒険の書 (Profile)", "クエストボード (Job)", "酒場 (Team)", "ダンジョン (Work)"],
-            index=0
+            index=1 # デモのためJobからスタート
         )
-        
         st.divider()
         st.info("💡 サイドバーでいつでも画面を切り替えられます")
 
-    # 画面ルーティング
     if selection == "冒険の書 (Profile)":
         page_profile()
     elif selection == "クエストボード (Job)":
