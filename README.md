@@ -9,6 +9,9 @@
 「店長」や「営業部長」といった巨大な役職（Job Title）を解体し、個人の得意な「スキル（Skill）」をパズルのように組み合わせてチームを結成します。
 
 ---
+**こちらは統合されました。 This has been integrated→[pithos](https://github.com/SBCM-Alliance/pithos)**
+
+
 
 ## 📖 コンセプト (Concept)
 
